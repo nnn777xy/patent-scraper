@@ -1,0 +1,42 @@
+name: Patent Scraper
+
+on:
+  workflow_dispatch:   # 手动触发
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340   # 5h40min，留20min余量（GitHub限制6h）
+
+    steps:
+      - name: Checkout 代码（含上次 checkpoint）
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas beautifulsoup4 lxml
+
+      - name: 运行爬虫
+        run: python patent_scraper.py
+        env:
+          GP_FAST_MODE: "1"   # 启用快速模式（GitHub服务器无封禁，延迟可更短）
+
+      - name: 上传爬取数据（Artifact）
+        uses: actions/upload-artifact@v4
+        if: always()   # 即使超时也上传
+        with:
+          name: patent-data-run${{ github.run_number }}
+          path: |
+            patent_data/
+            checkpoint.json
+          retention-days: 90
+
+      - name: 提交 checkpoint 回仓库（供下次续跑）
+        if: always()
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add checkpoint.json
+          git diff --staged --quiet && echo "checkpoint无变化" || \
+            (git commit -m "checkpoint: run ${{ github.run_number }} done" && git push)

@@ -1,0 +1,18 @@
+## 爬取数据（体积大，通过 Artifact 下载，不入仓库）
+patent_data/
+patents_CN_final.csv
+patents_US_final.csv
+patents_all_final.csv
+patents_all_enriched.csv
+
+## 日志
+scraper.log
+*.log
+
+## Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+## 临时文件
+detail_checkpoint.json
