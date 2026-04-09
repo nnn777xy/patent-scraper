@@ -58,8 +58,8 @@ _FAST = os.environ.get('GP_FAST_MODE') == '1'   # GitHub Actions 快速模式
 SESSION_REFRESH  = 50
 MIN_DELAY        = 2.0  if _FAST else 8.0    # 页间延迟
 MAX_DELAY        = 5.0  if _FAST else 15.0
-TASK_DELAY_MIN   = 3.0  if _FAST else 20.0   # 任务间延迟
-TASK_DELAY_MAX   = 7.0  if _FAST else 35.0   # 快速:~5s/任务 → 3960*5=5.5h
+TASK_DELAY_MIN   = 8.0  if _FAST else 20.0   # 任务间延迟（快速~10s/任务→3960*10=11h）
+TASK_DELAY_MAX   = 14.0 if _FAST else 35.0
 DETAIL_DELAY_MIN = 1.5  if _FAST else 3.0
 DETAIL_DELAY_MAX = 3.0  if _FAST else 6.0
 MAX_RETRIES      = 3
@@ -201,21 +201,22 @@ def build_xhr_url(keywords, country, ipc_code, date_after, date_before,
     """
     kw_str = '+OR+'.join(f'"{kw.replace(" ", "+")}"' for kw in keywords)
 
-    # 内层只包含不变的查询条件（不含 start/num）
+    # num 必须放在内层（实测：外层 num 只返回10条，内层 num 才能返回100条）
+    # start 放外层（内层 start 无效，但外层也无效——pagination 不可用）
     inner_parts = [
         f'q={kw_str}',
         f'country={country}',
         f'ipc={ipc_code}',
         f'before=priority:{date_before}',
         f'after=priority:{date_after}',
+        f'num={num}',
     ]
     inner_query = '&'.join(inner_parts)
 
-    # start 和 num 作为外层参数
     return (
         'https://patents.google.com/xhr/query?url='
         + urllib.parse.quote(inner_query, safe='')
-        + f'&exp=&tags=&num={num}&start={start}'
+        + '&exp=&tags='
     )
 
 
@@ -416,12 +417,16 @@ def save_checkpoint(cp):
 
 def scrape_task(session, keywords, country, ipc_code, da, db, task_name):
     """
-    爬取一个任务的所有专利，自动翻页。
-    返回 list[dict]。
+    爬取一个任务的所有专利。
+    返回：
+      list[dict]  — 成功且有数据
+      []          — 成功但无匹配专利（该时段确实没有）
+      None        — API 失败（503/429），需要下次重试
     """
     all_records = []
     seen_ids    = set()
     total_shown = None
+    api_failed  = False   # 区分"真无数据"与"API失败"
 
     for page in range(MAX_PAGES):
         start = page * RESULTS_PER_PAGE
@@ -433,6 +438,7 @@ def scrape_task(session, keywords, country, ipc_code, da, db, task_name):
 
         if records is None:
             logger.warning(f"  [{task_name}] XHR 失败，跳过剩余页")
+            api_failed = True
             break
 
         if page == 0:
@@ -461,6 +467,9 @@ def scrape_task(session, keywords, country, ipc_code, da, db, task_name):
 
         random_sleep()
 
+    # API失败且没有任何数据 → 返回 None，主循环不标为完成
+    if api_failed and not all_records:
+        return None
     return all_records
 
 
